@@ -1938,12 +1938,12 @@ class GPUModelRunner(LoRAModelRunnerMixin):
             return {}
 
     @contextmanager
-    def maybe_randomize_inputs(self, input_ids: torch.Tensor):
+    def maybe_randomize_inputs(self, input_ids: torch.Tensor, num_tokens: int):
         """
         Randomize input_ids if VLLM_RANDOMIZE_DP_DUMMY_INPUTS is set.
         This is to help balance expert-selection
          - during profile_run
-         - during DP rank dummy run 
+         - during DP rank dummy run
         """
         dp_size = self.vllm_config.parallel_config.data_parallel_size
         randomize_inputs = envs.VLLM_RANDOMIZE_DP_DUMMY_INPUTS and dp_size > 1
@@ -1958,11 +1958,18 @@ class GPUModelRunner(LoRAModelRunnerMixin):
                     self.input_ids,
                     low=0,
                     high=self.model_config.get_vocab_size(),
-                    dtype=input_ids.dtype)
+                    dtype=input_ids.dtype,
+                )
 
             logger.debug("Randomizing dummy data for DP Rank")
-            input_ids.copy_(rand_input_ids()[:input_ids.size(0)],
-                            non_blocking=True)
+
+            if input_ids is not None:
+                input_ids.copy_(
+                    rand_input_ids()[: input_ids.size(0)], non_blocking=True
+                )
+            else:
+                input_ids = rand_input_ids()[:num_tokens]
+
             yield
             input_ids.fill_(0)
 
@@ -2049,7 +2056,7 @@ class GPUModelRunner(LoRAModelRunnerMixin):
                 intermediate_tensors = self.sync_and_slice_intermediate_tensors(
                     num_tokens, None, False)
 
-            with self.maybe_randomize_inputs(input_ids), set_forward_context(
+            with self.maybe_randomize_inputs(input_ids, num_tokens), set_forward_context(
                     attn_metadata,
                     self.vllm_config,
                     num_tokens=num_tokens,
