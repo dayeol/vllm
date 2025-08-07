@@ -186,7 +186,7 @@ class Worker(WorkerBase):
 
     @torch.inference_mode()
     def determine_available_memory(self) -> int:
-        """Profiles the peak memory usage of the model to determine how much 
+        """Profiles the peak memory usage of the model to determine how much
         memory can be used for KV cache without OOMs.
 
         The engine will first conduct a profiling of the existing memory usage.
@@ -305,8 +305,13 @@ class Worker(WorkerBase):
                 get_pp_group().recv_tensor_dict(
                     all_gather_group=get_tp_group()))
 
-        output = self.model_runner.execute_model(scheduler_output,
+        # add trace annotation so that we can easily distinguish new/cached request numbers in each iteration
+        num_new_reqs = len(scheduler_output.scheduled_new_reqs)
+        num_cached_reqs = len(scheduler_output.scheduled_cached_reqs.req_ids)
+        with torch.profiler.record_function(f"execute_{num_new_reqs}_{num_cached_reqs}"):
+            output = self.model_runner.execute_model(scheduler_output,
                                                  intermediate_tensors)
+
         parallel_config = self.vllm_config.parallel_config
         if parallel_config.distributed_executor_backend != "external_launcher" \
             and not get_pp_group().is_last_rank:
